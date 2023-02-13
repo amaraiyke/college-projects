@@ -1,0 +1,122 @@
+1.) Inside each order_details document, add a field for the extendedPrice (after any discount) and fill in its value
+	
+	db.order_details.find({}).forEach(function(doc){ 
+      var extPrice = (doc.UnitPrice * doc.Quantity) *( 1 - doc.Discount);
+      db.order_details.updateOne(
+                {_id: doc._id},  
+                 {$set:{"extendedPrice": extPrice}},
+				 {upsert: true}
+                );
+    })
+
+
+2.) Embed the appropriate order_details documents into the orders documents. You will probably want to have an array of the embedded order_details documents
+	
+		db.orders.aggregate ([ 
+			{$lookup:
+				{from:"order_details",
+				localField:"OrderID",
+				foreignField:"OrderID",
+				as:"order_details_doc"}
+			},
+			{$out: "orders_new"}
+		])
+		
+		
+		
+	a.) In each of these orders documents, add a field for the total price (including shipping)
+
+		
+	db.orders_new.find({}).forEach(function(doc) {
+		var total = 0;
+		for (i = 0; i < doc.order_details_doc.length; i++)
+			{total += doc.order_details_doc[i].extendedPrice};
+		total += doc.Freight;
+		db.orders_new.updateOne(
+                {_id: doc._id},  
+                 {$set:{"TotalPrice": total}}
+                );
+		})
+
+3.) Display nicely the first 10 orders, showing only the OrderID, the CustomerID, the country shipped to, and the total price
+
+db.orders_new.aggregate([
+    {$lookup:{from:"customers", localField:"CustomerID", foreignField:"CustomerID", as:"orders_country"}},
+        {$out:"cus_orders"}])
+
+  db.cus_orders.aggregate([
+    {$unwind: "$orders_country"},
+    {$project: {_id:0, OrderID:1, CustomerID:1, TotalPrice:1, "orders_country.Country":1}},
+    {$limit: 10}
+    ])
+
+
+
+- After using count() to see how many orders there are, display the last 10 orders as above
+
+db.cus_orders.aggregate([
+    {$unwind: "$orders_country"},
+    {$project: {_id:0, OrderID:1, CustomerID:1, TotalPrice:1, "orders_country.Country":1}},
+    {$count: "AllOrdersCount"}
+    ])
+
+db.cus_orders.aggregate([
+    {$unwind: "$orders_country"},
+    {$project: {_id:0, OrderID:1, CustomerID:1, TotalPrice:1, "orders_country.Country":1}},
+    {$count: "AllOrdersCount"},
+    {$skip: 820}
+    ])
+
+
+
+You would like to know how adding an index on customers in the orders (or orders_modified)  collection affects the creation of an array named allOrders which has (orderNumber, totalPrice) as its entries.  That is, the allOrders array will be embedded in each customers documents and will have some summary information on what that customer has ordered. 
+
+You would like to find out the time for doing this without an index, 
+		db.customers.aggregate([
+    {$lookup:{from:"orders_new", localField:"CustomerID", foreignField:"CustomerID", as:"allOrders"}},
+        {$out:"CustomerOrder_Details"}])
+		
+then unset the array, create the index and now see how long it takes
+
+	db.orders_new.createIndex({"OrderID":1, "TotalPrice": 1})
+
+db.customers.aggregate([
+    {$lookup:{from:"orders_new", localField:"CustomerID", foreignField:"CustomerID", as:"allOrders"}},
+        {$out:"CustomerOrder_Deets"}])
+
+
+- A collection with one document for each country where Northwinds has a customer
+
+db.customers.aggregate([
+      {$group: {_id: "$Country",
+      CustomerCount: {$sum:1}}},
+      {$sort: {_id:1}},
+      {$out: "CustomerCountry"}])
+
+
+- A collection with one document for each country which also shows how many customers Northwinds has in that country and either the total or the average value of all orders in that country
+
+db.cus_orders.aggregate([
+      {$group: {_id: {Country:"$orders_country.Country"},
+      CustomerCount: {$sum:1}, TotalOrders:{$sum: "$TotalPrice"}}},
+      {$sort: {_id:1}},
+      {$out: "CustomerCountrywithTotal"}])
+	  
+	 
+
+
+
+
+db.CustomerOrder_Details.aggregate([
+    {$unwind: “$allOrders”}, 
+    {$project:{CustomerID:1, "allOrders.TotalPrice":1, "allOrders.OrderID": 1  }}
+    ])
+	
+Creating an index:
+
+
+db.orders_new.createIndex({"OrderID":1, "TotalPrice": 1})
+
+db.customers.aggregate([
+    {$lookup:{from:"orders_new", localField:"CustomerID", foreignField:"CustomerID", as:"allOrders"}},
+        {$out:"CustomerOrder_Deets"}])
